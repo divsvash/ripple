@@ -8,7 +8,7 @@ def test_connect_success_sets_opaque_httponly_cookie(client, upstream):
     assert body["connected"] is True
     assert body["account"]["plan_name"] == "Developer"
     assert body["account"]["total_searches_left"] == 100
-    assert body["ai"] == {"provider": "gemini", "mode": "server", "ready": True, "model": "gemini-2.5-flash"}
+    assert body["ai"] == {"provider": "gemini", "mode": "server", "ready": True, "model": "gemini-3.5-flash"}
     # Key and private account data never come back.
     assert KEY_A not in r.text and "private@example.com" not in r.text
 
@@ -156,5 +156,5 @@ def test_ai_unavailable_mode(upstream):
     app = make_app(upstream, gemini_api_key=None, allow_user_gemini_key=False)
     with make_client(app) as c:
         assert connect(c).json()["ai"] == {"provider": "gemini", "mode": "unavailable", "ready": False,
-                                          "model": "gemini-2.5-flash"}
+                                          "model": "gemini-3.5-flash"}
         assert c.post("/api/auth/gemini/connect", json={"api_key": GEMINI_USER_KEY}).status_code == 409

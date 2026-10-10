@@ -1,20 +1,14 @@
 {
-  "components\\GraphWorkspace.tsx -> ./Graph2D": {
-    "id": "components\\GraphWorkspace.tsx -> ./Graph2D",
+  "components/GraphWorkspace.tsx -> ./Graph2D": {
+    "id": "components/GraphWorkspace.tsx -> ./Graph2D",
     "files": [
       "static/chunks/_app-pages-browser_components_Graph2D_tsx.js"
     ]
   },
-  "components\\GraphWorkspace.tsx -> ./Graph3D": {
-    "id": "components\\GraphWorkspace.tsx -> ./Graph3D",
+  "components/GraphWorkspace.tsx -> ./Graph3D": {
+    "id": "components/GraphWorkspace.tsx -> ./Graph3D",
     "files": [
       "static/chunks/_app-pages-browser_components_Graph3D_tsx.js"
-    ]
-  },
-  "node_modules\\next\\dist\\client\\dev\\hot-reloader\\app\\use-websocket.js -> @vercel/turbopack-ecmascript-runtime/browser/dev/hmr-client/hmr-client.ts": {
-    "id": "node_modules\\next\\dist\\client\\dev\\hot-reloader\\app\\use-websocket.js -> @vercel/turbopack-ecmascript-runtime/browser/dev/hmr-client/hmr-client.ts",
-    "files": [
-      "static/chunks/_app-pages-browser_node_modules_next_dist_client_dev_noop-turbopack-hmr_js.js"
     ]
   }
 }

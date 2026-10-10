@@ -1,51 +1,101 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import ForceGraph3D, { type ForceGraphMethods, type NodeObject } from "react-force-graph-3d";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import ForceGraph3D, { type ForceGraphMethods, type LinkObject, type NodeObject } from "react-force-graph-3d";
 import * as THREE from "three";
-import { makeGraphData, type ForceLink, type ForceNode } from "../lib/graph";
+import { alphaFloorForce, endpointId, gravityForce, makeGraphData, wanderForce, type ForceGraphData, type ForceLink, type ForceNode } from "../lib/graph";
+import { domainColor, INK, PAPER, withAlpha } from "../lib/palette";
 import type { GraphEdge, GraphNode } from "../lib/types";
 
 interface Props { width: number; height: number; nodes: GraphNode[]; edges: GraphEdge[]; selectedNodeId: string | null; selectedEdgeId: string | null; highlightedNodes: Set<string>; highlightedEdges: Set<string>; focusToken: number; reducedMotion: boolean; onNodeClick: (id: string) => void; onEdgeClick: (id: string) => void; onBackgroundClick: () => void; }
 
+const SPHERE = new THREE.SphereGeometry(1, 24, 16);
+const materials = new Map<string, THREE.MeshLambertMaterial>();
+function material(color: string, faded: boolean, selected: boolean): THREE.MeshLambertMaterial {
+  const key = `${color}|${faded}|${selected}`;
+  let m = materials.get(key);
+  if (!m) {
+    m = new THREE.MeshLambertMaterial({ color, emissive: new THREE.Color(color), emissiveIntensity: selected ? 0.45 : 0.22, transparent: faded, opacity: faded ? 0.15 : 1 });
+    materials.set(key, m);
+  }
+  return m;
+}
+
 export default function Graph3D({ width, height, nodes, edges, selectedNodeId, selectedEdgeId, highlightedNodes, highlightedEdges, focusToken, reducedMotion, onNodeClick, onEdgeClick, onBackgroundClick }: Props) {
   const ref = useRef<ForceGraphMethods<ForceNode, ForceLink> | undefined>(undefined);
-  const data = useMemo(() => makeGraphData(nodes, edges), [nodes, edges]);
+  const previous = useRef<ForceGraphData | null>(null);
+  const data = useMemo(() => makeGraphData(nodes, edges, previous.current), [nodes, edges]);
+  useEffect(() => { previous.current = data; }, [data]);
+  const byId = useMemo(() => new Map(data.nodes.map((node) => [node.id, node])), [data]);
   const hasFilter = highlightedNodes.size > 0 || Boolean(selectedNodeId || selectedEdgeId);
   const fitPadding = Math.min(80, Math.max(32, width * 0.08));
 
   useEffect(() => {
     const graph = ref.current;
     if (!graph) return;
-    const charge = graph.d3Force("charge") as { strength?: (value: number) => unknown } | undefined;
+    const charge = graph.d3Force("charge") as { strength?: (value: number) => unknown; distanceMax?: (value: number) => unknown } | undefined;
     const link = graph.d3Force("link") as { distance?: (value: number) => unknown } | undefined;
-    charge?.strength?.(-220);
-    link?.distance?.(72);
+    charge?.strength?.(-160);
+    charge?.distanceMax?.(240);
+    link?.distance?.(56);
+    graph.d3Force("gravity", gravityForce(0.03, 3));
+    graph.d3Force("wander", reducedMotion ? null : wanderForce(0.02, 3));
+    const springs = [charge, link].filter(Boolean) as unknown as ((alpha: number) => void)[];
+    graph.d3Force("floor", reducedMotion ? null : alphaFloorForce(springs));
     graph.d3ReheatSimulation();
-  }, [data]);
+  }, [data, reducedMotion]);
 
   useEffect(() => {
     const graph = ref.current; if (!graph) return;
-    const duration = reducedMotion ? 0 : 800;
+    const duration = reducedMotion ? 0 : 900;
     if (highlightedNodes.size > 1) graph.zoomToFit(duration, fitPadding, (node) => highlightedNodes.has(node.id));
     else if (selectedNodeId) {
-      const node = data.nodes.find((item) => item.id === selectedNodeId);
+      const node = byId.get(selectedNodeId);
       if (node?.x != null && node.y != null && node.z != null) { const distance = 90; const length = Math.hypot(node.x, node.y, node.z) || 1; graph.cameraPosition({ x: node.x + node.x / length * distance, y: node.y + node.y / length * distance, z: node.z + node.z / length * distance }, { x: node.x, y: node.y, z: node.z }, duration); }
     } else graph.zoomToFit(duration, fitPadding);
-  }, [data.nodes, fitPadding, focusToken, highlightedNodes, reducedMotion, selectedNodeId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusToken]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { if (!selectedNodeId && !highlightedNodes.size) ref.current?.zoomToFit(reducedMotion ? 0 : 900, fitPadding); }, 1200);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  const nodeObject = useCallback((node: NodeObject<ForceNode>) => {
+    const selected = node.id === selectedNodeId;
+    const relevant = !hasFilter || highlightedNodes.has(node.id) || selected;
+    const mesh = new THREE.Mesh(SPHERE, material(domainColor(node.domain), !relevant, selected));
+    mesh.scale.setScalar(node.kind === "origin" ? 6 : selected ? 5.5 : 4);
+    return mesh;
+  }, [hasFilter, highlightedNodes, selectedNodeId]);
+
+  const isActive = (link: LinkObject<ForceNode, ForceLink>) => link.id === selectedEdgeId || highlightedEdges.has(link.id);
+  const colorOf = (link: LinkObject<ForceNode, ForceLink>) => domainColor(byId.get(endpointId(link.source as string | ForceNode))?.domain);
 
   return <div className="graph-canvas absolute inset-0">
     <ForceGraph3D<ForceNode, ForceLink>
-      ref={ref} width={width} height={height} graphData={data} backgroundColor="#050608" showNavInfo={false} warmupTicks={70} cooldownTicks={110} d3VelocityDecay={0.34}
-      nodeThreeObject={(node: NodeObject<ForceNode>) => { const selected = node.id === selectedNodeId; const relevant = !hasFilter || highlightedNodes.has(node.id) || selected; const radius = node.kind === "origin" ? 5.5 : selected ? 5 : 3.8; return new THREE.Mesh(new THREE.SphereGeometry(radius, 18, 12), new THREE.MeshPhongMaterial({ color: selected ? 0x60a5fa : 0x3b82f6, emissive: selected ? 0x1d4ed8 : 0x0b2455, emissiveIntensity: selected ? 1.2 : .7, transparent: true, opacity: relevant ? 1 : .12 })); }}
-      nodeLabel={(node) => `<div style="font:500 12px system-ui;color:#f5f5f5;background:#080a0d;border:1px solid rgba(255,255,255,.12);padding:6px 8px;border-radius:4px">${node.label}<span style="color:#858b96"> · ${node.domain}</span></div>`}
-      linkColor={(link) => link.id === selectedEdgeId || highlightedEdges.has(link.id) ? "#60a5fa" : hasFilter ? "rgba(133,139,150,.08)" : "rgba(133,139,150,.34)"}
-      linkWidth={(link) => link.id === selectedEdgeId ? 1.8 : highlightedEdges.has(link.id) ? 1.2 : .45}
-      linkOpacity={1} linkLabel={(link) => link.relation} linkDirectionalArrowLength={(link) => link.id === selectedEdgeId || highlightedEdges.has(link.id) ? 3.5 : 1.8} linkDirectionalArrowRelPos={.7}
+      ref={ref} width={width} height={height} graphData={data} backgroundColor={PAPER} showNavInfo={false}
+      warmupTicks={previous.current ? 0 : reducedMotion ? 70 : 20} cooldownTicks={reducedMotion ? 110 : Infinity} cooldownTime={reducedMotion ? 15000 : Infinity} d3VelocityDecay={reducedMotion ? 0.4 : 0.24}
+      nodeThreeObject={nodeObject}
+      nodeLabel={(node) => `<div style="font:500 12px system-ui;color:${INK};background:#fff;border:1px solid rgba(30,34,39,.08);box-shadow:0 8px 24px -8px rgba(30,34,39,.18);padding:5px 9px;border-radius:10px">${escapeHtml(node.label)}</div>`}
+      linkColor={(link) => isActive(link) ? colorOf(link) : hasFilter ? "rgba(30,34,39,.06)" : "rgba(30,34,39,.22)"}
+      linkWidth={(link) => link.id === selectedEdgeId ? 1.6 : highlightedEdges.has(link.id) ? 1.1 : 0}
+      linkOpacity={0.9}
+      linkDirectionalParticles={(link) => isActive(link) && !reducedMotion ? 3 : 0}
+      linkDirectionalParticleWidth={2.4}
+      linkDirectionalParticleSpeed={0.008}
+      linkDirectionalParticleColor={(link) => withAlpha(colorOf(link), 1)}
+      linkLabel={(link) => escapeHtml(link.relation)}
+      linkDirectionalArrowLength={(link) => isActive(link) ? 3.5 : 2} linkDirectionalArrowRelPos={0.7}
+      linkDirectionalArrowColor={(link) => isActive(link) ? colorOf(link) : "rgba(30,34,39,.3)"}
       onNodeClick={(node) => onNodeClick(node.id)} onLinkClick={(link) => onEdgeClick(link.id)} onBackgroundClick={onBackgroundClick}
-      onEngineStop={() => { if (!selectedNodeId && !highlightedNodes.size) ref.current?.zoomToFit(reducedMotion ? 0 : 650, fitPadding); }}
       enableNavigationControls
     />
-    {selectedNodeId && <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded border border-[#60a5fa]/30 bg-[#080a0d]/90 px-3 py-1.5 text-xs text-white">{nodes.find((node) => node.id === selectedNodeId)?.label}</div>}
+    {selectedNodeId && <div className="pointer-events-none absolute inset-x-0 top-16 flex justify-center"><div className="animate-pop rounded-full border border-line bg-surface px-3 py-1 text-xs font-medium text-ink shadow-soft">{byId.get(selectedNodeId)?.label}</div></div>}
   </div>;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }

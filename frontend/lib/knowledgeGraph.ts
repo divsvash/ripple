@@ -14,6 +14,17 @@ export function seedDiscoveryResponse(): DiscoveryResponse {
   };
 }
 
+export function emptyDiscoveryResponse(): DiscoveryResponse {
+  return {
+    event: { text: "", summary: "", origin_label: "", domain: "" },
+    graph: { nodes: [], edges: [] },
+    discoveries: [],
+    sources: [],
+    stats: { searches_used: 0, sources: 0, relationships: 0, hops_explored: 0 },
+    warnings: [], partial: false, message: null,
+  };
+}
+
 function slug(value: string): string {
   return value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80);
 }
@@ -22,13 +33,13 @@ function normalized(value: string): string {
   return value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-export function findLocalNode(nodes: GraphNode[], query: string): GraphNode | null {
+export function findLocalNode(nodes: GraphNode[], query: string, { strict = false } = {}): GraphNode | null {
   const needle = normalized(query);
   if (!needle) return null;
   const exact = nodes.find((node) => normalized(node.label) === needle);
   if (exact) return exact;
   const prefix = nodes.find((node) => normalized(node.label).startsWith(needle));
-  if (prefix) return prefix;
+  if (prefix || strict) return prefix ?? null;
   return nodes.find((node) => normalized(node.label).includes(needle) || needle.includes(normalized(node.label))) ?? null;
 }
 

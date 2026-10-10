@@ -87,7 +87,7 @@ export async function discover(
       buffer = buffer.slice(idx + 1);
       if (!line) continue;
       const msg = JSON.parse(line);
-      if (msg.type === "progress") onProgress({ stage: msg.stage, message: msg.message });
+      if (msg.type === "progress") { const { type: _type, ...event } = msg; onProgress(event as ProgressEvent); }
       else if (msg.type === "result") return msg.data as DiscoveryResponse;
       else if (msg.type === "error")
         throw new ApiError(msg.error.message, msg.error.code, 0, !!msg.error.retryable);

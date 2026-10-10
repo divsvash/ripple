@@ -1,23 +1,53 @@
 "use client";
 
-import { ExternalLink, X } from "lucide-react";
+import { ArrowDown, ExternalLink, X } from "lucide-react";
+import { domainColor, withAlpha } from "../lib/palette";
 import type { GraphEdge, GraphNode, Source } from "../lib/types";
+
+function hostname(url: string): string {
+  try { return new URL(url).hostname; } catch { return url; }
+}
+
+function DomainTag({ domain }: { domain: string }) {
+  const color = domainColor(domain);
+  return <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: withAlpha(color, 0.12), color }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />{domain}</span>;
+}
 
 interface EdgeProps { edge: GraphEdge; nodes: GraphNode[]; sources: Map<string, Source>; onClose: () => void; }
 export function EdgeInspector({ edge, nodes, sources, onClose }: EdgeProps) {
-  const labels = new Map(nodes.map((node) => [node.id, node.label]));
-  return <aside className="panel pointer-events-auto absolute bottom-3 right-3 top-3 z-20 flex w-[min(360px,calc(100vw-24px))] flex-col overflow-hidden" aria-label="Relationship details">
-    <div className="flex items-center justify-between border-b border-white/10 px-4 py-3"><span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#858b96]">Relationship</span><button onClick={onClose} className="icon-button h-7 w-7" aria-label="Close relationship details"><X className="h-4 w-4" /></button></div>
-    <div className="scrollbar-thin overflow-y-auto p-4">
-      <div className="text-sm font-medium text-white">{labels.get(edge.source) ?? edge.source}</div><div className="my-2 border-l border-[#3b82f6] py-1 pl-3 text-xs text-[#60a5fa]">{edge.relation}</div><div className="text-sm font-medium text-white">{labels.get(edge.target) ?? edge.target}</div>
-      <p className="mt-5 text-sm leading-6 text-[#a3a8b2]">{edge.mechanism}</p>
-      <div className="mt-5 border-t border-white/10 pt-4"><div className="flex items-center justify-between"><span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#858b96]">Assessment</span><span className="text-xs text-[#c2c5cc]">{edge.status === "evidence" ? "Evidence-supported" : "Hypothesis"}</span></div><div className="mt-2 h-0.5 bg-white/10"><div className="h-full bg-[#3b82f6]" style={{ width: `${Math.round(edge.confidence * 100)}%` }} /></div><div className="mt-1 flex justify-between font-mono text-[10px] text-[#666c77]"><span>{edge.provenance === "curated_seed" ? "Curated seed data" : "Live discovery"}</span><span>{Math.round(edge.confidence * 100)}% confidence</span></div></div>
-      <div className="mt-5 border-t border-white/10 pt-4"><h3 className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#858b96]">Supporting sources</h3><div className="mt-3 space-y-4">{edge.source_ids.map((id) => { const source = sources.get(id); return source ? <a key={id} className="group block text-xs leading-5" href={source.url} target="_blank" rel="noopener noreferrer"><span className="flex items-start gap-2 text-[#d8d9dd] group-hover:text-white"><ExternalLink className="mt-0.5 h-3 w-3 shrink-0 text-[#60a5fa]" /><span>{source.title}</span></span><span className="mt-1 block pl-5 text-[#666c77]">{source.publisher ?? source.url}</span><span className="mt-1 block pl-5 text-[#858b96]">{source.snippet}</span></a> : null; })}{edge.source_ids.length === 0 && <p className="text-xs text-[#666c77]">No supporting source was returned for this relationship.</p>}</div></div>
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const from = byId.get(edge.source); const to = byId.get(edge.target);
+  const evidenced = edge.status === "evidence";
+  return <aside className="panel pointer-events-auto absolute bottom-4 right-4 top-4 z-20 flex w-[min(340px,calc(100vw-32px))] animate-spring-in flex-col overflow-hidden" aria-label="Relationship details">
+    <div className="flex items-center justify-between px-4 pb-1 pt-3">
+      <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${evidenced ? "bg-[#22B573]/10 text-[#138a55]" : "bg-[#F5A524]/12 text-[#a86a00]"}`}>{evidenced ? "Evidence" : "Hypothesis"} · {Math.round(edge.confidence * 100)}%</span>
+      <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-faint transition hover:text-ink" aria-label="Close relationship details"><X className="h-4 w-4" /></button>
+    </div>
+    <div className="scrollbar-thin overflow-y-auto px-4 pb-4">
+      <div className="mt-2 text-[15px] font-semibold text-ink">{from?.label ?? edge.source}</div>
+      {from && <div className="mt-1"><DomainTag domain={from.domain} /></div>}
+      <div className="my-2.5 flex items-center gap-2 text-xs text-muted"><ArrowDown className="h-3.5 w-3.5" />{edge.relation}</div>
+      <div className="text-[15px] font-semibold text-ink">{to?.label ?? edge.target}</div>
+      {to && <div className="mt-1"><DomainTag domain={to.domain} /></div>}
+      {edge.mechanism && <p className="mt-4 text-[13px] leading-5 text-muted">{edge.mechanism}</p>}
+      <div className="mt-5 space-y-2">{edge.source_ids.map((id) => { const source = sources.get(id); return source ? <a key={id} className="group block rounded-xl border border-line bg-paper p-3 text-xs leading-5 transition hover:-translate-y-0.5 hover:bg-surface hover:shadow-soft" href={source.url} target="_blank" rel="noopener noreferrer"><span className="flex items-start gap-2 font-medium text-ink"><span className="flex-1">{source.title}</span><ExternalLink className="mt-0.5 h-3 w-3 shrink-0 text-faint group-hover:text-accent" /></span><span className="mt-1 block text-[11px] text-faint">{source.publisher ?? hostname(source.url)}</span><span className="mt-1.5 line-clamp-3 block text-muted">{source.snippet}</span></a> : null; })}{edge.source_ids.length === 0 && <p className="text-xs text-faint">No supporting source.</p>}</div>
     </div>
   </aside>;
 }
 
 interface NodeProps { node: GraphNode; connected: number; onClose: () => void; }
 export function NodeInspector({ node, connected, onClose }: NodeProps) {
-  return <aside className="panel pointer-events-auto absolute right-3 top-3 z-10 w-[min(290px,calc(100vw-24px))] p-4"><div className="flex items-start justify-between gap-3"><div><div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#60a5fa]">{node.kind === "origin" ? "Origin" : "Focused entity"}</div><h2 className="mt-2 text-base font-medium text-white">{node.label}</h2></div><button className="icon-button h-7 w-7" onClick={onClose} aria-label="Clear node focus"><X className="h-4 w-4" /></button></div><div className="mt-4 grid grid-cols-3 gap-4 border-t border-white/10 pt-3 text-xs"><div><div className="text-[#666c77]">Domain</div><div className="mt-1 text-[#c2c5cc]">{node.domain}</div></div><div><div className="text-[#666c77]">Connections</div><div className="mt-1 font-mono text-[#c2c5cc]">{connected}</div></div><div><div className="text-[#666c77]">Source</div><div className="mt-1 text-[#c2c5cc]">{node.provenance === "curated_seed" ? "Curated" : "Live"}</div></div></div></aside>;
+  const color = domainColor(node.domain);
+  return <aside className="panel pointer-events-auto absolute right-4 top-4 z-10 w-[min(260px,calc(100vw-32px))] animate-spring-in p-4">
+    <div className="flex items-start justify-between gap-3">
+      <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ background: color, boxShadow: `0 0 0 4px ${withAlpha(color, 0.18)}` }} />
+      <h2 className="flex-1 text-[15px] font-semibold leading-5 text-ink">{node.label}</h2>
+      <button className="-mr-1 -mt-1 flex h-7 w-7 items-center justify-center rounded-lg text-faint transition hover:text-ink" onClick={onClose} aria-label="Clear node focus"><X className="h-4 w-4" /></button>
+    </div>
+    <div className="mt-3 flex flex-wrap items-center gap-1.5 pl-6">
+      <DomainTag domain={node.domain} />
+      <span className="rounded-full bg-paper px-2 py-0.5 text-[11px] text-muted">{connected} link{connected === 1 ? "" : "s"}</span>
+      <span className="rounded-full bg-paper px-2 py-0.5 text-[11px] text-muted">{node.provenance === "curated_seed" ? "sample" : "live"}</span>
+    </div>
+  </aside>;
 }

@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppShell from "../components/AppShell";
 import { ApiError, disconnect, discover, getStatus, SESSION_ERRORS } from "../lib/api";
-import { findLocalNode, mergeDiscoveryResponse, seedDiscoveryResponse } from "../lib/knowledgeGraph";
-import type { ConnectionStatus, DiscoveryResponse, ProgressEvent } from "../lib/types";
+import { emptyDiscoveryResponse, findLocalNode, mergeDiscoveryResponse, seedDiscoveryResponse } from "../lib/knowledgeGraph";
+import type { ConnectionStatus, DiscoveryResponse, DiscoveryStats, ProgressEvent } from "../lib/types";
 
 export default function Home() {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
@@ -14,8 +14,10 @@ export default function Home() {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ProgressEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [lastRun, setLastRun] = useState<{ stats: DiscoveryStats; warnings: string[]; message: string | null } | null>(null);
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [focusRequest, setFocusRequest] = useState<{ id: string; token: number } | null>(null);
+  const [graphEpoch, setGraphEpoch] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
 
   const refreshStatus = useCallback(async () => {
@@ -43,10 +45,12 @@ export default function Home() {
     setRunning(true);
     setError(null);
     setProgress([]);
+    setLastRun(null);
     try {
       const data = await discover(event, (item) => setProgress((current) => [...current, item]), controller.signal);
       const merged = mergeDiscoveryResponse(result, data);
       setResult(merged);
+      setLastRun({ stats: data.stats, warnings: data.warnings, message: data.message ?? null });
       const focus = findLocalNode(merged.graph.nodes, data.event.origin_label) ?? findLocalNode(merged.graph.nodes, event);
       if (focus) setFocusRequest({ id: focus.id, token: Date.now() });
     } catch (err) {
@@ -64,7 +68,18 @@ export default function Home() {
     }
   }
 
-  const latestProgress = progress.at(-1) ?? null;
+  /** Replaces the whole graph (empty canvas or the sample) and resets the workspace. */
+  function replaceGraph(next: DiscoveryResponse) {
+    abortRef.current?.abort();
+    setResult(next);
+    setLastRun(null);
+    setProgress([]);
+    setError(null);
+    setQuery("");
+    setFocusRequest(null);
+    setGraphEpoch((epoch) => epoch + 1);
+  }
+
   const liveDiscoveryProblem = useMemo(() => {
     if (statusError) return "Live discovery is unavailable because the backend could not be reached.";
     if (!status) return "Checking live discovery availability…";
@@ -79,7 +94,11 @@ export default function Home() {
       result={result}
       query={query}
       running={running}
-      progress={latestProgress}
+      progress={progress}
+      lastRun={lastRun}
+      graphEpoch={graphEpoch}
+      onNewGraph={() => replaceGraph(emptyDiscoveryResponse())}
+      onLoadSample={() => replaceGraph(seedDiscoveryResponse())}
       error={error}
       liveDiscoveryProblem={liveDiscoveryProblem}
       focusRequest={focusRequest}

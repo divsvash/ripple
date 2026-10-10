@@ -55,7 +55,9 @@ def load_dotenv(path: str = ".env") -> None:
 class Settings:
     # Gemini (Option A: operator-provided key; Option B: user BYOK fallback)
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.5-flash"
+    # Tried when the main model is overloaded, rate limited or unavailable.
+    gemini_fallback_model: str | None = "gemini-3.5-flash-lite"
     allow_user_gemini_key: bool = True
 
     # Sessions
@@ -95,7 +97,8 @@ class Settings:
             )
         return cls(
             gemini_api_key=os.getenv("GEMINI_API_KEY") or None,
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            gemini_model=os.getenv("GEMINI_MODEL") or "gemini-3.5-flash",
+            gemini_fallback_model=os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite").strip() or None,
             allow_user_gemini_key=_bool("ALLOW_USER_GEMINI_KEY", True),
             session_ttl_seconds=_int("SESSION_TTL_SECONDS", 60 * 60),
             session_max_age_seconds=_int("SESSION_MAX_AGE_SECONDS", 12 * 60 * 60),

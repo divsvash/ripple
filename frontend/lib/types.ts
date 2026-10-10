@@ -105,4 +105,11 @@ export interface DiscoveryResponse {
 export interface ProgressEvent {
   stage: string;
   message: string;
+  hop?: number;
+  query?: string;
+  queries?: string[];
+  results?: number;
+  failed?: boolean;
 }
+
+export type DiscoveryStats = DiscoveryResponse["stats"];
