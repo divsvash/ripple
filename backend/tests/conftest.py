@@ -71,6 +71,8 @@ class FakeUpstream:
         self.gemini_requests: list[dict] = []
         self.gemini_mode: dict[str, str] = {}  # stage -> ok|quota|timeout|garbage
         self.extract_empty = False
+        self.gemini_overloaded_models: set[str] = set()
+        self.gemini_models_used: list[str] = []
         self.account_mode = "ok"  # ok | down | timeout
 
     # -- transport ------------------------------------------------------------
@@ -119,6 +121,10 @@ class FakeUpstream:
         if request.method == "GET":  # key validation
             key = request.headers.get("x-goog-api-key")
             return httpx.Response(200 if key in (GEMINI_SERVER_KEY, GEMINI_USER_KEY) else 400, json={})
+        model = request.url.path.rsplit("/", 1)[-1].split(":")[0]
+        self.gemini_models_used.append(model)
+        if model in self.gemini_overloaded_models:
+            return httpx.Response(503, json={"error": {"status": "UNAVAILABLE", "message": "high demand"}})
         body = json.loads(request.content)
         prompt = body["contents"][0]["parts"][0]["text"]
         self.gemini_requests.append({"headers": dict(request.headers), "body": request.content.decode()})

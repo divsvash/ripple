@@ -34,7 +34,8 @@ def create_app(settings: Settings | None = None, *, http: httpx.AsyncClient | No
     owns_http = http is None
     http = http or httpx.AsyncClient(follow_redirects=False)
     serpapi = SerpApiClient(http, timeout=settings.upstream_timeout_seconds)
-    gemini = GeminiClient(http, model=settings.gemini_model, timeout=settings.llm_timeout_seconds)
+    gemini = GeminiClient(http, model=settings.gemini_model, fallback_model=settings.gemini_fallback_model,
+                          timeout=settings.llm_timeout_seconds)
     svc = Services(
         settings=settings,
         http=http,

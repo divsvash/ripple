@@ -43,8 +43,8 @@ async def discover_stream(body: DiscoverRequest, request: Request,
     sid, creds = _prepare(request, svc)  # auth errors are returned before streaming
     queue: asyncio.Queue = asyncio.Queue()
 
-    async def progress(stage: str, message: str) -> None:
-        await queue.put({"type": "progress", "stage": stage, "message": message})
+    async def progress(stage: str, message: str, detail: dict | None = None) -> None:
+        await queue.put({"type": "progress", "stage": stage, "message": message, **(detail or {})})
 
     async def worker() -> None:
         try:

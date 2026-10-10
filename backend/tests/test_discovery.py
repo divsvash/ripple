@@ -1,5 +1,6 @@
 import json
 
+from app.discovery.graph import mentions
 from conftest import GEMINI_SERVER_KEY, KEY_A, KEY_B, connect, make_app, make_client
 
 EVENT = {"event": "Natural gas prices are increasing."}
@@ -199,6 +200,11 @@ def test_streaming_endpoint_emits_progress_then_result(client):
         lines = [json.loads(line) for line in r.iter_lines() if line]
     stages = [l["stage"] for l in lines if l["type"] == "progress"]
     assert stages[0] == "parse" and "search" in stages and stages[-1] == "done"
+    planned = [l for l in lines if l.get("stage") == "search"]
+    assert planned[0]["hop"] == 1 and len(planned[0]["queries"]) == 3
+    results = [l for l in lines if l.get("stage") == "search_result"]
+    assert len(results) == 4 and {r["hop"] for r in results} == {1, 2}
+    assert all(isinstance(r["query"], str) and isinstance(r["results"], int) for r in results)
     assert lines[-1]["type"] == "result"
     assert lines[-1]["data"]["discoveries"]
 
@@ -223,3 +229,30 @@ def test_discovery_rate_limit(upstream):
         connect(c)
         assert c.post("/api/discover", json=EVENT).status_code == 200
         assert c.post("/api/discover", json=EVENT).status_code == 429
+
+
+def test_grounding_check_requires_whole_words():
+    assert not mentions("Oil", "Soil erosion worsens farming")
+    assert not mentions("Natural gas prices", "Natural disasters hit Vegas")
+    assert not mentions("AI chips", "He said the chipsets were late")
+    assert mentions("Fertilizer costs", "fertiliser production costs soar")
+    assert mentions("Carbon dioxide shortage", "causing a carbon dioxide shortage")
+
+
+def test_gemini_overload_falls_back_to_secondary_model(client, upstream):
+    connect(client)
+    settings = client.app.state.services.settings
+    upstream.gemini_overloaded_models = {settings.gemini_model}
+    r = client.post("/api/discover", json=EVENT)
+    assert r.status_code == 200, r.text
+    assert r.json()["discoveries"]
+    assert settings.gemini_fallback_model in upstream.gemini_models_used
+
+
+def test_gemini_overload_on_both_models_reports_overload(client, upstream):
+    connect(client)
+    settings = client.app.state.services.settings
+    upstream.gemini_overloaded_models = {settings.gemini_model, settings.gemini_fallback_model}
+    r = client.post("/api/discover", json=EVENT)
+    assert r.status_code == 503
+    assert "overloaded" in r.json()["error"]["message"]

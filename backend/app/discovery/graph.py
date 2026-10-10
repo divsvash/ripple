@@ -3,6 +3,7 @@ selection for exploration, and candidate-path scoring."""
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 
@@ -12,7 +13,8 @@ ORIGIN_ID = "origin"
 
 _STOPWORDS = {"the", "and", "for", "with", "from", "into", "that", "this", "cost", "costs",
               "price", "prices", "rate", "rates", "market", "markets", "demand", "supply",
-              "global", "industry", "sector", "increase", "increased", "higher", "rising"}
+              "global", "industry", "sector", "increase", "increased", "higher", "rising",
+              "of", "in", "on", "to", "by", "at", "an", "as", "or", "is", "it", "be"}
 
 
 def node_key(label: str) -> str:
@@ -21,16 +23,28 @@ def node_key(label: str) -> str:
 
 
 def _tokens(label: str) -> list[str]:
-    words = [w for w in node_key(label).split() if len(w) >= 3]
+    words = [w for w in node_key(label).split() if len(w) >= 2]
     meaningful = [w for w in words if w not in _STOPWORDS]
     return meaningful or words
 
 
+def _word_matches(token: str, word: str) -> bool:
+    # Short tokens ("gas", "oil", "ai") must match a whole word; longer ones
+    # match on a shared 5-char word start, so 'fertilizer' ~ 'fertiliser'.
+    if len(token) < 5:
+        return token == word
+    return word[:5] == token[:5]
+
+
 def mentions(label: str, text: str) -> bool:
-    """True if the cited text mentions the entity (5-char prefix match, so
-    'fertilizers' matches 'fertiliser production' loosely enough)."""
-    haystack = node_key(text)
-    return any(tok[:5] in haystack for tok in _tokens(label))
+    """True if the cited text mentions the entity: most of the label's
+    meaningful words must appear as whole words (or word stems) in the text."""
+    words = set(node_key(text).split())
+    tokens = _tokens(label)
+    if not tokens:
+        return False
+    hits = sum(any(_word_matches(tok, w) for w in words) for tok in tokens)
+    return hits >= math.ceil(0.6 * len(tokens))
 
 
 @dataclass

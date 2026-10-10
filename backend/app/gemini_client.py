@@ -24,10 +24,11 @@ GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 
 class GeminiClient:
-    def __init__(self, http: httpx.AsyncClient, *, model: str = "gemini-2.5-flash",
-                 base_url: str = GEMINI_BASE, timeout: float = 60.0):
+    def __init__(self, http: httpx.AsyncClient, *, model: str = "gemini-3.5-flash",
+                 fallback_model: str | None = None, base_url: str = GEMINI_BASE, timeout: float = 60.0):
         self._http = http
         self._model = model
+        self._fallback = fallback_model if fallback_model and fallback_model != model else None
         self._base = base_url.rstrip("/")
         self._timeout = timeout
 
@@ -50,17 +51,29 @@ class GeminiClient:
     async def generate_json(self, prompt: str, api_key: Secret, *,
                             forbidden: list[Secret] | None = None,
                             temperature: float = 0.4) -> Any:
-        """Calls Gemini in JSON mode and returns the parsed JSON value."""
+        """Calls Gemini in JSON mode and returns the parsed JSON value. If the
+        main model is overloaded, rate limited or missing, the fallback model
+        is tried once before giving up."""
         scrubbed = redact(prompt, [s.reveal() for s in (forbidden or [])])
         body = {
             "contents": [{"role": "user", "parts": [{"text": scrubbed}]}],
             "generationConfig": {"temperature": temperature, "responseMimeType": "application/json"},
         }
+        if not self._fallback:
+            return await self._generate(self._model, body, api_key, self._timeout)
+        try:
+            # Leave time for the fallback: an overloaded model can hang rather than fail fast.
+            return await self._generate(self._model, body, api_key, self._timeout / 2)
+        except (GeminiUnavailable, GeminiQuotaExhausted) as exc:
+            logger.warning("Gemini model %s failed (%s); retrying with %s", self._model, exc.code, self._fallback)
+            return await self._generate(self._fallback, body, api_key, self._timeout / 2)
+
+    async def _generate(self, model: str, body: dict, api_key: Secret, timeout: float) -> Any:
         try:
             response = await self._http.post(
-                f"{self._base}/models/{self._model}:generateContent",
+                f"{self._base}/models/{model}:generateContent",
                 headers={"x-goog-api-key": api_key.reveal(), "content-type": "application/json"},
-                json=body, timeout=self._timeout)
+                json=body, timeout=timeout)
         except httpx.TimeoutException:
             logger.warning("Gemini request timed out")
             raise GeminiTimeout() from None
@@ -75,8 +88,13 @@ class GeminiClient:
             raise GeminiInvalidKey()
         if status == 429:
             raise GeminiQuotaExhausted()
+        if status == 503:
+            raise GeminiUnavailable("Gemini is overloaded right now (high demand). Try again in a moment.")
         if status >= 500:
             raise GeminiUnavailable()
+        if status == 404:
+            logger.warning("Gemini model %s is not available", model)
+            raise GeminiUnavailable(f"The Gemini model '{model}' is not available to this key.", retryable=False)
         if status != 200:
             logger.warning("Gemini returned status %s", status)
             raise GeminiBadResponse()

@@ -28,7 +28,7 @@ from .graph import ORIGIN_ID, Relationship, RelationshipGraph, mentions
 
 logger = logging.getLogger("ripple.discovery")
 
-ProgressFn = Callable[[str, str], Awaitable[None]]
+ProgressFn = Callable[[str, str, "dict | None"], Awaitable[None]]
 
 NO_CONNECTIONS_MESSAGE = (
     "Ripple could not find defensible connections in the retrieved sources. "
@@ -84,9 +84,9 @@ class _Run:
         self.searches_used = 0
         self.hops = 0
 
-    async def progress(self, stage: str, message: str) -> None:
+    async def progress(self, stage: str, message: str, detail: dict | None = None) -> None:
         if self._progress:
-            await self._progress(stage, message)
+            await self._progress(stage, message, detail)
 
     async def llm(self, prompt: str, temperature: float = 0.4):
         # The SerpApi key is passed as forbidden so it can never leave in a prompt.
@@ -110,8 +110,7 @@ class _Run:
             queries = [self.event[:150]]
         graph = RelationshipGraph(origin_label, domain)
 
-        await self.progress("search", f"Searching the web with {len(queries)} exploratory queries")
-        hop1_sources = await self.search_all(queries)
+        hop1_sources = await self.search_all(queries, hop=1)
         if not hop1_sources:
             raise NoSearchResults()
 
@@ -132,12 +131,22 @@ class _Run:
         message = None if discoveries else NO_CONNECTIONS_MESSAGE
         return self.response(graph, origin_label, domain, summary, discoveries, message)
 
-    async def search_all(self, queries: list[str]) -> list[Source]:
+    async def search_all(self, queries: list[str], hop: int) -> list[Source]:
         sem = asyncio.Semaphore(4)
+        await self.progress("search", f"Searching Google via SerpApi with {len(queries)} queries",
+                            {"hop": hop, "queries": queries})
 
         async def one(q: str):
             async with sem:
-                return await self.e.serpapi.search(q, self.creds.serpapi_key, num=self.e.results_per_query)
+                try:
+                    results = await self.e.serpapi.search(q, self.creds.serpapi_key, num=self.e.results_per_query)
+                except Exception:
+                    await self.progress("search_result", f"Search failed: {q}",
+                                        {"hop": hop, "query": q, "failed": True})
+                    raise
+            await self.progress("search_result", f"{len(results)} results for {q}",
+                                {"hop": hop, "query": q, "results": len(results)})
+            return results
 
         outcomes = await asyncio.gather(*(one(q) for q in queries), return_exceptions=True)
         new_sources: list[Source] = []
@@ -222,7 +231,7 @@ class _Run:
             queries = [q for q in dict.fromkeys(queries) if q][: self.e.max_followup_queries]
             if not queries:
                 return
-            new_sources = await self.search_all(queries)
+            new_sources = await self.search_all(queries, hop=2)
             if not new_sources:
                 self.warnings.append("Second-order searches returned no new sources.")
                 return
