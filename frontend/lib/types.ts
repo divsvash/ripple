@@ -30,6 +30,7 @@ export interface Source {
   publisher?: string | null;
   date?: string | null;
   query: string;
+  provenance?: "curated_seed" | "live_discovery";
 }
 
 export type EdgeStatus = "evidence" | "hypothesis";
@@ -40,6 +41,7 @@ export interface GraphNode {
   domain: string;
   kind: "origin" | "entity";
   hop: number;
+  provenance?: "curated_seed" | "live_discovery";
 }
 
 export interface GraphEdge {
@@ -51,6 +53,16 @@ export interface GraphEdge {
   status: EdgeStatus;
   source_ids: string[];
   confidence: number;
+  provenance?: "curated_seed" | "live_discovery";
+}
+
+export interface SeedGraphBundle {
+  version: string;
+  title: string;
+  description: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  sources: Source[];
 }
 
 export interface DiscoveryStep {

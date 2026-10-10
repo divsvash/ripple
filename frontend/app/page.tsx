@@ -1,120 +1,97 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import DiscoveryView from "@/components/DiscoveryView";
-import GeminiKeyCard from "@/components/GeminiKeyCard";
-import SetupCard from "@/components/SetupCard";
-import Spinner from "@/components/Spinner";
-import StatusBar from "@/components/StatusBar";
-import { ApiError, disconnect, getStatus } from "@/lib/api";
-import type { ConnectionStatus } from "@/lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AppShell from "../components/AppShell";
+import { ApiError, disconnect, discover, getStatus, SESSION_ERRORS } from "../lib/api";
+import { findLocalNode, mergeDiscoveryResponse, seedDiscoveryResponse } from "../lib/knowledgeGraph";
+import type { ConnectionStatus, DiscoveryResponse, ProgressEvent } from "../lib/types";
 
 export default function Home() {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [replacing, setReplacing] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [result, setResult] = useState<DiscoveryResponse>(() => seedDiscoveryResponse());
+  const [query, setQuery] = useState("");
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<ProgressEvent[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = useState<{ id: string; token: number } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refreshStatus = useCallback(async () => {
     try {
-      setLoadError(null);
-      const s = await getStatus();
-      if (s.session_expired) setNotice("Your session expired. Reconnect your SerpApi key to continue.");
-      setStatus(s);
+      setStatusError(null);
+      const next = await getStatus();
+      if (next.session_expired) setSessionNotice("Your session expired. Reconnect to continue.");
+      setStatus(next);
     } catch (err) {
-      setLoadError(err instanceof ApiError ? err.message : "Could not reach the Ripple server.");
+      setStatusError(err instanceof ApiError ? err.message : "Could not reach the Ripple server.");
     }
   }, []);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  useEffect(() => { void refreshStatus(); }, [refreshStatus]);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
-  if (loadError) {
-    return (
-      <main className="flex min-h-screen items-center justify-center p-4">
-        <div className="card max-w-md p-6 text-center">
-          <p className="text-rose-300">{loadError}</p>
-          <button className="btn-primary mt-4" onClick={refresh}>Retry</button>
-        </div>
-      </main>
-    );
+  async function runLiveSearch(text: string) {
+    if (running || !status?.connected || !status.ai.ready) return;
+    const event = text.trim();
+    if (event.length < 3) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setQuery(event);
+    setRunning(true);
+    setError(null);
+    setProgress([]);
+    try {
+      const data = await discover(event, (item) => setProgress((current) => [...current, item]), controller.signal);
+      const merged = mergeDiscoveryResponse(result, data);
+      setResult(merged);
+      const focus = findLocalNode(merged.graph.nodes, data.event.origin_label) ?? findLocalNode(merged.graph.nodes, event);
+      if (focus) setFocusRequest({ id: focus.id, token: Date.now() });
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
+      const apiError = err instanceof ApiError ? err : new ApiError("Discovery failed.", "unknown", 0, true);
+      if (SESSION_ERRORS.has(apiError.code)) {
+        setSessionNotice(apiError.message);
+        setStatus((current) => current ? { ...current, connected: false } : current);
+      } else {
+        setError(apiError.message);
+      }
+    } finally {
+      setRunning(false);
+      abortRef.current = null;
+    }
   }
 
-  if (!status) {
-    return (
-      <main className="flex min-h-screen items-center justify-center text-slate-400">
-        <Spinner className="h-6 w-6" />
-      </main>
-    );
-  }
-
-  if (!status.connected) {
-    return (
-      <main className="flex min-h-screen items-center justify-center p-4">
-        <SetupCard
-          ai={status.ai}
-          mode="initial"
-          notice={notice}
-          onConnected={(s) => {
-            setNotice(null);
-            setStatus(s);
-          }}
-        />
-      </main>
-    );
-  }
+  const latestProgress = progress.at(-1) ?? null;
+  const liveDiscoveryProblem = useMemo(() => {
+    if (statusError) return "Live discovery is unavailable because the backend could not be reached.";
+    if (!status) return "Checking live discovery availability…";
+    if (!status.connected) return sessionNotice ?? "Connect SerpApi to enable live discovery.";
+    if (!status.ai.ready) return "Gemini is currently required for live discovery. Local exploration remains available.";
+    return null;
+  }, [sessionNotice, status, statusError]);
 
   return (
-    <main className="min-h-screen">
-      <StatusBar
-        status={status}
-        onReplace={() => setReplacing(true)}
-        onDisconnect={async () => {
-          try {
-            setStatus(await disconnect());
-          } catch {
-            await refresh();
-          }
-          setNotice(null);
-        }}
-      />
-
-      {replacing && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true">
-          <SetupCard
-            ai={status.ai}
-            mode="replace"
-            onConnected={(s) => {
-              setStatus(s);
-              setReplacing(false);
-            }}
-            onCancel={() => setReplacing(false)}
-          />
-        </div>
-      )}
-
-      {!status.ai.ready && (
-        <div className="mx-auto max-w-3xl px-4 pt-6 sm:px-6">
-          {status.ai.mode === "user" ? (
-            <GeminiKeyCard onConnected={setStatus} />
-          ) : (
-            <div className="card border-rose-400/30 p-5 text-sm text-rose-200">
-              <strong>An AI provider is required.</strong> SerpApi is connected, but this deployment has no Gemini
-              key configured, so discoveries can&apos;t run. The operator needs to set <code>GEMINI_API_KEY</code>.
-            </div>
-          )}
-        </div>
-      )}
-
-      <DiscoveryView
-        disabled={!status.ai.ready}
-        onSessionError={async (message) => {
-          setNotice(message);
-          const s = await getStatus().catch(() => null);
-          setStatus(s ? { ...s, connected: false } : { ...status, connected: false });
-        }}
-      />
-    </main>
+    <AppShell
+      status={status}
+      result={result}
+      query={query}
+      running={running}
+      progress={latestProgress}
+      error={error}
+      liveDiscoveryProblem={liveDiscoveryProblem}
+      focusRequest={focusRequest}
+      onLocalFocus={(id, label) => { setQuery(label); setError(null); setFocusRequest({ id, token: Date.now() }); }}
+      onLiveSearch={runLiveSearch}
+      onCancel={() => abortRef.current?.abort()}
+      onStatusChange={(next) => { setStatus(next); setSessionNotice(null); }}
+      onDisconnect={async () => {
+        try { setStatus(await disconnect()); }
+        catch { await refreshStatus(); }
+        setSessionNotice(null);
+      }}
+    />
   );
 }
